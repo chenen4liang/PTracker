@@ -733,7 +733,7 @@ struct CycleChartView: View {
                                 Text("Cycle")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                if let cycleLength = getCycleLength(for: period) {
+                                if let cycleLength = calculateCycleLength(for: period) {
                                     Text("\(cycleLength) d")
                                         .font(.body)
                                 } else {
@@ -751,7 +751,7 @@ struct CycleChartView: View {
         }
     }
     
-    private func getCycleLength(for period: Period) -> Int? {
+    private func calculateCycleLength(for period: Period) -> Int? {
         let sortedPeriods = periods.sorted { $0.startDate < $1.startDate }
         guard let index = sortedPeriods.firstIndex(where: { $0.id == period.id }),
               index > 0 else {

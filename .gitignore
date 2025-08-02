@@ -101,3 +101,7 @@ __pycache__/
 # Generated icons
 /AppIcon/
 /icon_*.png
+
+# Google Service Account (contains private key)
+GoogleServiceAccount.json
+/PTracker/GoogleServiceAccount.json

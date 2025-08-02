@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PTracker Google Sheet Data</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .step {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .copy-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        .copy-btn:hover {
+            background: #45a049;
+        }
+        .link {
+            color: #1976d2;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+        #copyArea {
+            position: absolute;
+            left: -9999px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 PTracker Google Sheet Setup</h1>
+        
+        <div class="instructions">
+            <h2>📋 Quick Setup Instructions:</h2>
+            <div class="step">1️⃣ Open your sheet: <a href="https://docs.google.com/spreadsheets/d/1H3EOvKRu4YUl2BldU6dNR0YdaDUIMC0Oa4xkuqInET0/edit" target="_blank" class="link">Click here to open</a></div>
+            <div class="step">2️⃣ Select cell A1 in your sheet</div>
+            <div class="step">3️⃣ Click the "Copy Table Data" button below</div>
+            <div class="step">4️⃣ Paste (Ctrl+V or Cmd+V) into your Google Sheet</div>
+            <div class="step">5️⃣ Click Share → Change to "Anyone with the link can view"</div>
+        </div>
+
+        <button class="copy-btn" onclick="copyTableData()">📋 Copy Table Data</button>
+        
+        <table id="dataTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>StartDate</th>
+                    <th>EndDate</th>
+                    <th>Duration</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+        
+        <textarea id="copyArea"></textarea>
+    </div>
+
+    <script>
+        // Period data
+        const periods = [
+            { date: "2025-01-14", duration: 7 },
+            { date: "2025-02-15", duration: 7 },
+            { date: "2025-03-16", duration: 7 },
+            { date: "2025-04-15", duration: 7 },
+            { date: "2025-05-10", duration: 7 },
+            { date: "2025-06-09", duration: 7 },
+            { date: "2025-07-09", duration: 7 }
+        ];
+
+        // Generate table data
+        function generateTableData() {
+            const tbody = document.getElementById('tableBody');
+            const rows = [];
+            
+            periods.forEach(period => {
+                const id = generateUUID();
+                const startDate = new Date(period.date);
+                const endDate = new Date(startDate);
+                endDate.setDate(endDate.getDate() + period.duration - 1);
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${id}</td>
+                    <td>${formatDate(startDate)}</td>
+                    <td>${formatDate(endDate)}</td>
+                    <td>${period.duration}</td>
+                    <td></td>
+                `;
+                tbody.appendChild(row);
+                
+                rows.push([id, formatDate(startDate), formatDate(endDate), period.duration, '']);
+            });
+            
+            return rows;
+        }
+
+        // Format date to ISO8601
+        function formatDate(date) {
+            return date.toISOString().replace(/\.\d{3}/, '');
+        }
+
+        // Generate UUID
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Copy table data to clipboard
+        function copyTableData() {
+            const headers = ['ID', 'StartDate', 'EndDate', 'Duration', 'Notes'];
+            const rows = [];
+            
+            // Get all table rows
+            const tableRows = document.querySelectorAll('#dataTable tbody tr');
+            tableRows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                const rowData = Array.from(cells).map(cell => cell.textContent);
+                rows.push(rowData.join('\t'));
+            });
+            
+            // Combine headers and rows
+            const tableData = headers.join('\t') + '\n' + rows.join('\n');
+            
+            // Copy to clipboard
+            const copyArea = document.getElementById('copyArea');
+            copyArea.value = tableData;
+            copyArea.style.position = 'fixed';
+            copyArea.style.left = '0';
+            copyArea.style.top = '0';
+            copyArea.select();
+            document.execCommand('copy');
+            copyArea.style.position = 'absolute';
+            copyArea.style.left = '-9999px';
+            
+            // Show feedback
+            const btn = document.querySelector('.copy-btn');
+            const originalText = btn.textContent;
+            btn.textContent = '✅ Copied!';
+            btn.style.background = '#4CAF50';
+            
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+
+        // Initialize on page load
+        generateTableData();
+    </script>
+</body>
+</html>

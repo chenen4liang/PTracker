@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var showingEditPeriod = false
     @State private var periodToEdit: Period?
     @State private var showingChartView = false
+    @State private var showingSettings = false
     
     var averageCycleLength: Int {
         guard periods.count >= 2 else { return 28 }
@@ -215,6 +216,15 @@ struct ContentView: View {
                 .padding()
             }
             .navigationTitle("Period Tracker")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showingSettings = true
+                    }) {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
             .onAppear {
                 loadPeriods()
                 requestNotificationPermission()
@@ -250,6 +260,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingChartView) {
             CycleChartView(periods: periods)
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(periods: $periods)
         }
     }
     

@@ -631,7 +631,11 @@ struct CycleChartView: View {
                                 .padding(.horizontal, 20)
                                 .background(showingCycleLength ? Color.white : Color.clear)
                                 .foregroundColor(showingCycleLength ? .teal : .white)
+                                #if canImport(UIKit)
                                 .cornerRadius(20, corners: [.topLeft, .bottomLeft])
+                                #else
+                                .cornerRadius(20)
+                                #endif
                         }
                         
                         Button(action: {
@@ -643,7 +647,11 @@ struct CycleChartView: View {
                                 .padding(.horizontal, 20)
                                 .background(!showingCycleLength ? Color.white : Color.clear)
                                 .foregroundColor(!showingCycleLength ? .teal : .white)
+                                #if canImport(UIKit)
                                 .cornerRadius(20, corners: [.topRight, .bottomRight])
+                                #else
+                                .cornerRadius(20)
+                                #endif
                         }
                     }
                     .overlay(
@@ -953,6 +961,9 @@ struct CycleLineChart: View {
     }
 }
 
+#if canImport(UIKit)
+import UIKit
+
 extension View {
     func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: radius, corners: corners))
@@ -972,7 +983,17 @@ struct RoundedCorner: Shape {
         return Path(path.cgPath)
     }
 }
+#endif
 
-#Preview {
+#Preview("Content View") {
     ContentView()
+        .preferredColorScheme(.light)
+}
+
+#Preview("Cycle Chart") {
+    CycleChartView(periods: [
+        Period(id: UUID(), startDate: Date().addingTimeInterval(-60*86400), endDate: Date().addingTimeInterval(-57*86400)),
+        Period(id: UUID(), startDate: Date().addingTimeInterval(-30*86400), endDate: Date().addingTimeInterval(-27*86400)),
+        Period(id: UUID(), startDate: Date(), endDate: nil)
+    ])
 }

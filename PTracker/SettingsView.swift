@@ -1,15 +1,12 @@
 import SwiftUI
+#if canImport(UIKit)
+import UniformTypeIdentifiers
+#endif
 
 struct SettingsView: View {
-    @StateObject private var sheetsManager = GoogleSheetsManager.shared
-    @State private var sheetID = ""
-    @State private var showingInstructions = false
     @State private var showingExportSheet = false
     @State private var csvExport = ""
-    @State private var showingDocumentPicker = false
-    @State private var showingAuthAlert = false
-    @State private var authAlertMessage = ""
-    @State private var apiKey = ""
+    @State private var csvFileURL: URL?
     
     @Binding var periods: [Period]
     @Environment(\.dismiss) var dismiss
@@ -17,86 +14,24 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Google Sheets Authentication")) {
-                    if sheetsManager.isAuthenticated {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("Authenticated")
-                                .foregroundColor(.green)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 10) {
-                            // Option 1: Service Account (Full Access)
-                            Button(action: {
-                                showingDocumentPicker = true
-                            }) {
-                                Label("Upload Service Account JSON", systemImage: "doc.badge.plus")
-                            }
-                            .foregroundColor(.blue)
-                            
-                            Text("Or")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                            
-                            // Option 2: API Key (Read-Only)
-                            TextField("Google API Key", text: $apiKey)
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                            
-                            if !apiKey.isEmpty {
-                                Button(action: {
-                                    sheetsManager.configureWithAPIKey(apiKey)
-                                    authAlertMessage = "API Key configured successfully!"
-                                    showingAuthAlert = true
-                                }) {
-                                    Label("Use API Key", systemImage: "key")
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                    }
-                    
-                    Button("How to authenticate?") {
-                        showingInstructions = true
-                    }
-                    .foregroundColor(.blue)
-                }
-                
-                Section(header: Text("Sync")) {
-                    if sheetsManager.isSyncing {
-                        HStack {
-                            ProgressView()
-                            Text("Syncing...")
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        Button(action: syncData) {
-                            Label("Sync with Google Sheets", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        
-                        if let lastSync = sheetsManager.lastSyncDate {
-                            Text("Last synced: \(lastSync, style: .relative)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                Section(header: Text("Export")) {
+                Section(header: Text("Data Export")) {
                     Button(action: exportToCSV) {
                         Label("Export to CSV", systemImage: "square.and.arrow.up")
                     }
                     
-                    Text("Export your data as CSV to manually import into Google Sheets")
+                    Text("Export your period data as a CSV file")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Section(header: Text("About")) {
+                    Text("Period Tracker helps you track your menstrual cycles and predict future periods.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 Section(header: Text("Privacy")) {
-                    Text("Your period data is stored locally on your device. Google Sheets sync is optional and requires you to manually configure access.")
+                    Text("Your period data is stored locally on your device. No data is sent to external servers.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -111,53 +46,119 @@ struct SettingsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingInstructions) {
-            InstructionsView()
-        }
+        #if canImport(UIKit)
         .sheet(isPresented: $showingExportSheet) {
-            ShareSheet(items: [csvExport])
-        }
-        .sheet(isPresented: $showingDocumentPicker) {
-            DocumentPicker { url in
-                handleServiceAccountFile(url)
+            if let fileURL = csvFileURL {
+                ShareSheet(items: [fileURL])
             }
         }
-        .alert("Authentication", isPresented: $showingAuthAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(authAlertMessage)
-        }
-    }
-    
-    private func handleServiceAccountFile(_ url: URL) {
-        do {
-            let data = try Data(contentsOf: url)
-            sheetsManager.configureWithServiceAccount(jsonData: data)
-            authAlertMessage = "Service account configured successfully!"
-            showingAuthAlert = true
-        } catch {
-            authAlertMessage = "Failed to load service account file: \(error.localizedDescription)"
-            showingAuthAlert = true
-        }
-    }
-    
-    private func syncData() {
-        sheetsManager.syncPeriods(localPeriods: periods) { result in
-            switch result {
-            case .success(let syncedPeriods):
-                // Update local periods with synced data
-                periods = syncedPeriods
-            case .failure(let error):
-                print("Sync error: \(error.localizedDescription)")
+        #else
+        .sheet(isPresented: $showingExportSheet) {
+            // Fallback for non-UIKit platforms
+            VStack {
+                Text("CSV Export")
+                    .font(.title)
+                    .padding()
+                ScrollView {
+                    Text(csvExport)
+                        .font(.system(.body, design: .monospaced))
+                        .padding()
+                }
+                Button("Done") {
+                    showingExportSheet = false
+                }
+                .padding()
             }
         }
+        #endif
     }
     
     private func exportToCSV() {
-        csvExport = sheetsManager.exportToCSV(periods: periods)
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        var csv = "Start Date,End Date,Duration (days),Cycle Length (days)\n"
+        
+        let sortedPeriods = periods.sorted { $0.startDate < $1.startDate }
+        
+        for (index, period) in sortedPeriods.enumerated() {
+            let startDate = dateFormatter.string(from: period.startDate)
+            let endDate = period.endDate != nil ? dateFormatter.string(from: period.endDate!) : ""
+            let duration = period.duration
+            
+            // Calculate cycle length to next period
+            var cycleLength = ""
+            if index < sortedPeriods.count - 1 {
+                let nextPeriod = sortedPeriods[index + 1]
+                let days = Calendar.current.dateComponents([.day], from: period.startDate, to: nextPeriod.startDate).day ?? 0
+                cycleLength = "\(days)"
+            }
+            
+            csv += "\(startDate),\(endDate),\(duration),\(cycleLength)\n"
+        }
+        
+        csvExport = csv
+        
+        #if canImport(UIKit)
+        // Create a temporary file
+        let fileName = "period_tracker_export_\(Date().timeIntervalSince1970).csv"
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        do {
+            try csv.write(to: tempURL, atomically: true, encoding: .utf8)
+            // Share the file URL instead of the string
+            csvFileURL = tempURL
+        } catch {
+            print("Failed to create CSV file: \(error)")
+        }
+        #endif
+        
         showingExportSheet = true
     }
 }
+
+#if canImport(UIKit)
+import UIKit
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct DocumentPicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+    
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.json])
+        picker.delegate = context.coordinator
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+    
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        
+        init(onPick: @escaping (URL) -> Void) {
+            self.onPick = onPick
+        }
+        
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else { return }
+            onPick(url)
+        }
+    }
+}
+#endif
 
 struct InstructionsView: View {
     @Environment(\.dismiss) var dismiss
@@ -166,46 +167,29 @@ struct InstructionsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("How to Set Up Google Sheets")
+                    Text("How to Use Period Tracker")
                         .font(.title2)
-                        .fontWeight(.bold)
+                        .bold()
                     
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("1. Create a Google Sheet")
-                            .fontWeight(.semibold)
-                        Text("Go to sheets.google.com and create a new spreadsheet")
-                        
-                        Text("2. Set up columns")
-                            .fontWeight(.semibold)
-                        Text("Add these headers in row 1:")
-                        Text("• A1: ID\n• B1: StartDate\n• C1: EndDate\n• D1: Duration\n• E1: Notes")
-                            .font(.caption)
-                            .padding(.leading)
-                        
-                        Text("3. Get the Sheet ID")
-                            .fontWeight(.semibold)
-                        Text("Look at your sheet URL:")
-                        Text("docs.google.com/spreadsheets/d/SHEET_ID/edit")
-                            .font(.caption)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
-                        Text("Copy the SHEET_ID part")
-                        
-                        Text("4. Make sheet readable")
-                            .fontWeight(.semibold)
-                        Text("Click Share → Change to 'Anyone with the link can view'")
-                        Text("(For read-only sync)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Label("Track Your Period", systemImage: "1.circle.fill")
+                            .font(.headline)
+                        Text("Tap the + button to log when your period starts. The app will automatically calculate cycle lengths and predict future periods.")
                     }
-                    .padding()
                     
-                    Text("Note: Currently supports read-only sync. For full sync, OAuth2 setup is required.")
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                        .padding()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("View Statistics", systemImage: "2.circle.fill")
+                            .font(.headline)
+                        Text("See your average cycle length, period duration, and other helpful statistics based on your tracked data.")
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Export Your Data", systemImage: "3.circle.fill")
+                            .font(.headline)
+                        Text("Export your period data as a CSV file that you can save or share with your healthcare provider.")
+                    }
                 }
+                .padding()
             }
             .navigationTitle("Instructions")
             .navigationBarTitleDisplayMode(.inline)
@@ -219,48 +203,3 @@ struct InstructionsView: View {
         }
     }
 }
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-#if canImport(UIKit)
-import UniformTypeIdentifiers
-
-struct DocumentPicker: UIViewControllerRepresentable {
-    let onPick: (URL) -> Void
-    
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.json])
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
-        return picker
-    }
-    
-    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let parent: DocumentPicker
-        
-        init(_ parent: DocumentPicker) {
-            self.parent = parent
-        }
-        
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let url = urls.first else { return }
-            parent.onPick(url)
-        }
-    }
-}
-#endif

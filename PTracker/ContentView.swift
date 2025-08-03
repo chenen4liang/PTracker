@@ -224,6 +224,15 @@ struct ContentView: View {
                         Image(systemName: "gearshape")
                     }
                 }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    // Import manual data button
+                    Button(action: {
+                        importManualData()
+                    }) {
+                        Label("Import", systemImage: "square.and.arrow.down")
+                    }
+                }
             }
             .onAppear {
                 loadPeriods()
@@ -366,6 +375,106 @@ struct ContentView: View {
         
         let request = UNNotificationRequest(identifier: "periodDay", content: content, trigger: trigger)
         UNUserNotificationCenter.current().add(request)
+    }
+    
+    func importManualData() {
+        // Clear existing periods
+        periods.removeAll()
+        
+        // Manual data from user
+        let manualData = [
+            // 2025 data (ISO format)
+            ("2025-01-14T00:00:00Z", "2025-01-20T00:00:00Z", 7),
+            ("2025-02-15T00:00:00Z", "2025-02-21T00:00:00Z", 7),
+            ("2025-03-16T00:00:00Z", "2025-03-22T00:00:00Z", 7),
+            ("2025-04-15T00:00:00Z", "2025-04-21T00:00:00Z", 7),
+            ("2025-05-10T00:00:00Z", "2025-05-16T00:00:00Z", 7),
+            ("2025-06-09T00:00:00Z", "2025-06-15T00:00:00Z", 7),
+            ("2025-07-09T00:00:00Z", "2025-07-15T00:00:00Z", 7),
+            // 2024 data
+            ("2024-12-20", "2024-12-27", 7),
+            ("2024-11-23", "2024-11-30", 7),
+            ("2024-10-23", "2024-10-30", 7),
+            ("2024-09-24", "2024-10-01", 7),
+            ("2024-08-26", "2024-09-02", 7),
+            ("2024-07-28", "2024-08-04", 7),
+            ("2024-06-27", "2024-07-04", 7),
+            ("2024-05-31", "2024-06-07", 7),
+            ("2024-04-30", "2024-05-07", 7),
+            ("2024-03-28", "2024-04-04", 7),
+            ("2024-02-24", "2024-03-02", 7),
+            ("2024-01-21", "2024-01-28", 7),
+            // 2023 data  
+            ("2023-12-20", "2023-12-27", 7),
+            ("2023-11-22", "2023-11-29", 7),
+            ("2023-10-18", "2023-10-25", 7),
+            ("2023-09-18", "2023-09-25", 7),
+            ("2023-08-19", "2023-08-26", 7),
+            ("2023-07-21", "2023-07-28", 7),
+            ("2023-06-24", "2023-07-01", 7),
+            ("2023-05-27", "2023-06-03", 7),
+            ("2023-04-28", "2023-05-05", 7),
+            ("2023-03-31", "2023-04-07", 7),
+            ("2023-02-28", "2023-03-07", 7),
+            ("2023-01-31", "2023-02-07", 7),
+            // 2022 data
+            ("2022-12-31", "2023-01-07", 7),
+            ("2022-12-02", "2022-12-09", 7),
+            ("2022-11-01", "2022-11-08", 7),
+            ("2022-10-05", "2022-10-12", 7),
+            ("2022-09-02", "2022-09-09", 7),
+            ("2022-08-01", "2022-08-08", 7),
+            ("2022-07-05", "2022-07-12", 7),
+            ("2022-06-07", "2022-06-14", 7),
+            ("2022-05-06", "2022-05-12", 6),
+            ("2022-04-10", "2022-04-17", 7),
+            ("2022-03-14", "2022-03-21", 7),
+            ("2022-02-14", "2022-02-21", 7),
+            ("2022-01-14", "2022-01-21", 7),
+            // 2021 data
+            ("2021-12-12", "2021-12-19", 7),
+            ("2021-11-13", "2021-11-20", 7),
+            ("2021-10-13", "2021-10-20", 7),
+            ("2021-09-13", "2021-09-20", 7)
+        ]
+        
+        let isoFormatter = ISO8601DateFormatter()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.timeZone = TimeZone(identifier: "UTC")
+        
+        for (startStr, endStr, _) in manualData {
+            var startDate: Date?
+            var endDate: Date?
+            
+            // Try ISO format first
+            if startStr.contains("T") {
+                startDate = isoFormatter.date(from: startStr)
+                endDate = isoFormatter.date(from: endStr)
+            } else {
+                // Try simple date format
+                startDate = dateFormatter.date(from: startStr)
+                endDate = dateFormatter.date(from: endStr)
+            }
+            
+            if let start = startDate, let end = endDate {
+                let period = Period(
+                    id: UUID(),
+                    startDate: start,
+                    endDate: end
+                )
+                periods.append(period)
+            }
+        }
+        
+        // Sort by date (newest first)
+        periods.sort { $0.startDate > $1.startDate }
+        
+        // Save to local storage
+        savePeriods()
+        
+        // Show success message
+        print("Successfully imported \(periods.count) periods!")
     }
 }
 
@@ -761,8 +870,11 @@ struct CycleChartView: View {
     
     private func calculateCycleLength(for period: Period) -> Int? {
         let sortedPeriods = periods.sorted { $0.startDate < $1.startDate }
-        guard let index = sortedPeriods.firstIndex(where: { $0.id == period.id }),
-              index > 0 else {
+        guard let index = sortedPeriods.firstIndex(where: { $0.id == period.id }) else {
+            return nil
+        }
+        
+        guard index > 0 else {
             return nil
         }
         

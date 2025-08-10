@@ -24,35 +24,46 @@ struct ContentView: View {
         var cycleLengths: [Int] = []
         
         for i in 1..<sortedPeriods.count {
+            guard i < sortedPeriods.count else { continue }
             let daysBetween = Calendar.current.dateComponents([.day], 
                 from: sortedPeriods[i-1].startDate, 
-                to: sortedPeriods[i].startDate).day ?? 28
-            cycleLengths.append(daysBetween)
+                to: sortedPeriods[i].startDate).day
+            if let days = daysBetween, days > 0, days < 100 {
+                cycleLengths.append(days)
+            }
         }
         
-        return cycleLengths.isEmpty ? 28 : cycleLengths.reduce(0, +) / cycleLengths.count
+        guard !cycleLengths.isEmpty else { return 28 }
+        let average = cycleLengths.reduce(0, +) / cycleLengths.count
+        return max(20, min(45, average)) // Clamp to reasonable range
     }
     
     var nextPeriodDate: Date? {
-        guard let lastPeriod = periods.sorted(by: { $0.startDate > $1.startDate }).first else {
-            return nil
-        }
+        guard !periods.isEmpty else { return nil }
         
-        return Calendar.current.date(byAdding: .day, value: averageCycleLength, to: lastPeriod.startDate)
+        let sortedPeriods = periods.sorted(by: { $0.startDate > $1.startDate })
+        guard let lastPeriod = sortedPeriods.first else { return nil }
+        
+        let cycleLength = averageCycleLength
+        guard cycleLength > 0 else { return nil }
+        
+        return Calendar.current.date(byAdding: .day, value: cycleLength, to: lastPeriod.startDate)
     }
     
     var daysUntilNextPeriod: Int? {
         guard let next = nextPeriodDate else { return nil }
-        return Calendar.current.dateComponents([.day], from: Date(), to: next).day
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: next).day
+        return days.map { max(0, $0) } // Never return negative days
     }
     
     var currentCycleDay: Int {
-        guard let lastPeriod = periods.sorted(by: { $0.startDate > $1.startDate }).first else {
-            return 1
-        }
+        guard !periods.isEmpty else { return 1 }
+        
+        let sortedPeriods = periods.sorted(by: { $0.startDate > $1.startDate })
+        guard let lastPeriod = sortedPeriods.first else { return 1 }
         
         let daysSinceLastPeriod = Calendar.current.dateComponents([.day], from: lastPeriod.startDate, to: Date()).day ?? 0
-        return daysSinceLastPeriod + 1
+        return max(1, min(averageCycleLength, daysSinceLastPeriod + 1))
     }
     
     var body: some View {
@@ -236,12 +247,20 @@ struct ContentView: View {
             }
             .onAppear {
                 loadPeriods()
-                requestNotificationPermission()
-                scheduleNextPeriodNotification()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    requestNotificationPermission()
+                    scheduleNextPeriodNotification()
+                }
             }
         }
         .sheet(isPresented: $showingAddPeriod) {
             AddPeriodView { startDate, endDate in
+                // Additional validation
+                guard startDate <= Date() else { return }
+                if let end = endDate {
+                    guard end >= startDate && end <= Date() else { return }
+                }
+                
                 let period = Period(
                     id: UUID(),
                     startDate: startDate,
@@ -255,11 +274,18 @@ struct ContentView: View {
         .sheet(isPresented: $showingEditPeriod) {
             if let period = periodToEdit {
                 EditPeriodView(period: period) { updatedPeriod in
-                    if let index = periods.firstIndex(where: { $0.id == period.id }) {
-                        periods[index] = updatedPeriod
-                        savePeriods()
-                        scheduleNextPeriodNotification()
+                    guard let index = periods.firstIndex(where: { $0.id == period.id }),
+                          index < periods.count else { return }
+                    
+                    // Validate the updated period
+                    guard updatedPeriod.startDate <= Date() else { return }
+                    if let end = updatedPeriod.endDate {
+                        guard end >= updatedPeriod.startDate && end <= Date() else { return }
                     }
+                    
+                    periods[index] = updatedPeriod
+                    savePeriods()
+                    scheduleNextPeriodNotification()
                 } onDelete: {
                     periods.removeAll { $0.id == period.id }
                     savePeriods()
@@ -276,9 +302,16 @@ struct ContentView: View {
     }
     
     func loadPeriods() {
-        if let data = UserDefaults.standard.data(forKey: "SavedPeriods"),
-           let decoded = try? JSONDecoder().decode([Period].self, from: data) {
-            periods = decoded
+        if let data = UserDefaults.standard.data(forKey: "SavedPeriods") {
+            do {
+                let decoded = try JSONDecoder().decode([Period].self, from: data)
+                periods = decoded
+            } catch {
+                print("Error decoding periods: \(error)")
+                // Clear corrupted data and start fresh
+                UserDefaults.standard.removeObject(forKey: "SavedPeriods")
+                importHistoricalData()
+            }
         } else {
             // Import historical data if no periods exist
             importHistoricalData()
@@ -288,6 +321,8 @@ struct ContentView: View {
     func importHistoricalData() {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d, yyyy"
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone.current
         
         // Historical periods from your data with exact dates and durations
         let historicalPeriods = [
@@ -303,8 +338,12 @@ struct ContentView: View {
         var importedPeriods: [Period] = []
         
         for (dateString, duration) in historicalPeriods {
-            if let startDate = dateFormatter.date(from: dateString) {
-                let endDate = Calendar.current.date(byAdding: .day, value: duration - 1, to: startDate)
+            guard let startDate = dateFormatter.date(from: dateString) else {
+                print("Failed to parse date: \(dateString)")
+                continue
+            }
+            
+            if let endDate = Calendar.current.date(byAdding: .day, value: duration - 1, to: startDate) {
                 let period = Period(
                     id: UUID(),
                     startDate: startDate,
@@ -314,23 +353,31 @@ struct ContentView: View {
             }
         }
         
-        periods = importedPeriods
-        savePeriods()
+        if !importedPeriods.isEmpty {
+            periods = importedPeriods
+            savePeriods()
+        }
     }
     
     func savePeriods() {
-        if let encoded = try? JSONEncoder().encode(periods) {
+        do {
+            let encoded = try JSONEncoder().encode(periods)
             UserDefaults.standard.set(encoded, forKey: "SavedPeriods")
+            UserDefaults.standard.synchronize()
+        } catch {
+            print("Error saving periods: \(error)")
         }
     }
     
     func deletePeriods(at offsets: IndexSet) {
+        guard !offsets.isEmpty else { return }
         periods.remove(atOffsets: offsets)
         savePeriods()
         scheduleNextPeriodNotification()
     }
     
     func deletePeriod(_ period: Period) {
+        guard periods.contains(where: { $0.id == period.id }) else { return }
         periods.removeAll { $0.id == period.id }
         savePeriods()
         scheduleNextPeriodNotification()
@@ -338,7 +385,9 @@ struct ContentView: View {
     
     func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if granted {
+            if let error = error {
+                print("Notification permission error: \(error)")
+            } else if granted {
                 print("Notification permission granted")
             }
         }
@@ -348,10 +397,12 @@ struct ContentView: View {
         // Remove existing notifications
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         
-        guard let nextDate = nextPeriodDate else { return }
+        guard let nextDate = nextPeriodDate,
+              nextDate > Date() else { return }
         
-        // Schedule notification 3 days before
-        if let notificationDate = Calendar.current.date(byAdding: .day, value: -3, to: nextDate) {
+        // Schedule notification 3 days before (with validation)
+        if let notificationDate = Calendar.current.date(byAdding: .day, value: -3, to: nextDate),
+           notificationDate > Date() {
             let content = UNMutableNotificationContent()
             content.title = "Period Reminder"
             content.body = "Your period is expected in 3 days"
@@ -361,20 +412,30 @@ struct ContentView: View {
             let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
             
             let request = UNNotificationRequest(identifier: "periodReminder", content: content, trigger: trigger)
-            UNUserNotificationCenter.current().add(request)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("Error scheduling 3-day reminder: \(error)")
+                }
+            }
         }
         
-        // Schedule notification on the day
-        let content = UNMutableNotificationContent()
-        content.title = "Period Expected Today"
-        content.body = "Based on your average cycle of \(averageCycleLength) days"
-        content.sound = .default
-        
-        let dateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour], from: nextDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
-        
-        let request = UNNotificationRequest(identifier: "periodDay", content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request)
+        // Schedule notification on the day (with validation)
+        if nextDate > Date() {
+            let content = UNMutableNotificationContent()
+            content.title = "Period Expected Today"
+            content.body = "Based on your average cycle of \(averageCycleLength) days"
+            content.sound = .default
+            
+            let dateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour], from: nextDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
+            
+            let request = UNNotificationRequest(identifier: "periodDay", content: content, trigger: trigger)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("Error scheduling period day notification: \(error)")
+                }
+            }
+        }
     }
     
     func importManualData() {
@@ -485,7 +546,8 @@ struct Period: Identifiable, Codable {
     
     var duration: Int {
         guard let endDate = endDate else { return 1 }
-        return Calendar.current.dateComponents([.day], from: startDate, to: endDate).day! + 1
+        let days = Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0
+        return max(1, days + 1)
     }
 }
 
@@ -524,9 +586,21 @@ struct AddPeriodView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
-                        onSave(startDate, hasEnded ? endDate : nil)
+                        // Validate dates before saving
+                        let validEndDate = hasEnded ? endDate : nil
+                        if let end = validEndDate, end < startDate {
+                            // Don't save if end date is before start date
+                            return
+                        }
+                        // Ensure dates are not in the future
+                        let now = Date()
+                        let safeStartDate = startDate > now ? now : startDate
+                        let safeEndDate = validEndDate.map { $0 > now ? now : $0 }
+                        
+                        onSave(safeStartDate, safeEndDate)
                         dismiss()
                     }
+                    .disabled(hasEnded && endDate < startDate)
                 }
             }
         }
@@ -590,12 +664,20 @@ struct EditPeriodView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
+                        // Validate dates before saving
+                        let validEndDate = hasEnded ? endDate : nil
+                        if let end = validEndDate, end < startDate {
+                            return
+                        }
+                        
                         var updatedPeriod = period
-                        updatedPeriod.startDate = startDate
-                        updatedPeriod.endDate = hasEnded ? endDate : nil
+                        let now = Date()
+                        updatedPeriod.startDate = startDate > now ? now : startDate
+                        updatedPeriod.endDate = validEndDate.map { $0 > now ? now : $0 }
                         onSave(updatedPeriod)
                         dismiss()
                     }
+                    .disabled(hasEnded && endDate < startDate)
                 }
             }
         }
@@ -614,9 +696,10 @@ struct CycleCircleView: View {
                 .stroke(Color.white.opacity(0.3), lineWidth: 2)
                 .frame(width: 200, height: 200)
             
-            // Cycle dots
-            ForEach(0..<averageCycleLength, id: \.self) { day in
-                let angle = Double(day) * 360.0 / Double(averageCycleLength) - 90
+            // Cycle dots (with safety bounds)
+            ForEach(0..<min(45, max(1, averageCycleLength)), id: \.self) { day in
+                let safeCycleLength = max(1, averageCycleLength)
+                let angle = Double(day) * 360.0 / Double(safeCycleLength) - 90
                 let color = getDotColor(for: day + 1)
                 
                 Circle()
@@ -677,10 +760,14 @@ struct CycleChartView: View {
         var lengths: [Int] = []
         
         for i in 1..<sortedPeriods.count {
-            let daysBetween = Calendar.current.dateComponents([.day], 
+            guard i < sortedPeriods.count else { continue }
+            
+            if let daysBetween = Calendar.current.dateComponents([.day], 
                 from: sortedPeriods[i-1].startDate, 
-                to: sortedPeriods[i].startDate).day ?? 28
-            lengths.append(daysBetween)
+                to: sortedPeriods[i].startDate).day,
+               daysBetween > 0 && daysBetween < 100 {
+                lengths.append(daysBetween)
+            }
         }
         
         return lengths
@@ -869,17 +956,23 @@ struct CycleChartView: View {
     }
     
     private func calculateCycleLength(for period: Period) -> Int? {
-        let sortedPeriods = periods.sorted { $0.startDate < $1.startDate }
-        guard let index = sortedPeriods.firstIndex(where: { $0.id == period.id }) else {
-            return nil
-        }
+        guard !periods.isEmpty else { return nil }
         
-        guard index > 0 else {
+        let sortedPeriods = periods.sorted { $0.startDate < $1.startDate }
+        guard let index = sortedPeriods.firstIndex(where: { $0.id == period.id }),
+              index > 0,
+              index < sortedPeriods.count else {
             return nil
         }
         
         let previousPeriod = sortedPeriods[index - 1]
-        return Calendar.current.dateComponents([.day], from: previousPeriod.startDate, to: period.startDate).day
+        let days = Calendar.current.dateComponents([.day], from: previousPeriod.startDate, to: period.startDate).day
+        
+        // Validate reasonable cycle length
+        if let d = days, d > 0, d < 100 {
+            return d
+        }
+        return nil
     }
     
     private var chartDateFormatter: DateFormatter {
@@ -951,10 +1044,12 @@ struct CycleHistoryChartView: View {
                             .fontWeight(.medium)
                             .position(x: chartWidth - 20, y: avgY - 15)
                         
-                        // Data points
-                        ForEach(0..<cycleLengths.count, id: \.self) { index in
+                        // Data points (with bounds checking)
+                        ForEach(0..<min(cycleLengths.count, 100), id: \.self) { index in
+                            if index < cycleLengths.count {
                             let cycleLength = cycleLengths[index]
-                            let x = 30 + (CGFloat(index) / CGFloat(cycleLengths.count - 1)) * chartWidth
+                            let divisor = max(1, cycleLengths.count - 1)
+                            let x = 30 + (CGFloat(index) / CGFloat(divisor)) * chartWidth
                             let y = chartHeight - (CGFloat(cycleLength - 20) / 20.0 * chartHeight)
                             
                             // Vertical line from average to data point
@@ -976,6 +1071,7 @@ struct CycleHistoryChartView: View {
                                 .foregroundColor(.white)
                                 .fontWeight(.medium)
                                 .position(x: x, y: y - 15)
+                            }
                         }
                     }
                     .padding(.top, 20)
@@ -1046,9 +1142,10 @@ struct CycleLineChart: View {
                             .foregroundColor(.orange)
                             .position(x: chartWidth - 40, y: chartHeight * (1 - (averageValue - 2) / (10 - 2)))
                         
-                        // Data points
-                        ForEach(0..<data.count, id: \.self) { index in
-                            let value = data[index]
+                        // Data points (with bounds checking)
+                        ForEach(0..<min(data.count, 100), id: \.self) { index in
+                            if index < data.count {
+                            let value = min(10, max(1, data[index]))
                             let x = 30 + (Double(index) / Double(max(data.count - 1, 1))) * chartWidth
                             let y = chartHeight * (1 - (Double(value) - 2) / (10 - 2))
                             
@@ -1063,6 +1160,7 @@ struct CycleLineChart: View {
                                 .fill(Color.white)
                                 .frame(width: 8, height: 8)
                                 .position(x: x, y: y)
+                            }
                         }
                     }
                 }

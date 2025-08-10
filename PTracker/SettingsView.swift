@@ -83,7 +83,7 @@ struct SettingsView: View {
         
         for (index, period) in sortedPeriods.enumerated() {
             let startDate = dateFormatter.string(from: period.startDate)
-            let endDate = period.endDate != nil ? dateFormatter.string(from: period.endDate!) : ""
+            let endDate = period.endDate.map { dateFormatter.string(from: $0) } ?? ""
             let duration = period.duration
             
             // Calculate cycle length to next period

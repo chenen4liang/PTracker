@@ -63,7 +63,9 @@ struct ContentView: View {
         guard let lastPeriod = sortedPeriods.first else { return 1 }
         
         let daysSinceLastPeriod = Calendar.current.dateComponents([.day], from: lastPeriod.startDate, to: Date()).day ?? 0
-        return max(1, min(averageCycleLength, daysSinceLastPeriod + 1))
+        // Add 1 because the start date is day 1, not day 0
+        let cycleDay = daysSinceLastPeriod + 1
+        return max(1, min(averageCycleLength, cycleDay))
     }
     
     var body: some View {

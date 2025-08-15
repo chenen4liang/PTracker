@@ -555,8 +555,6 @@ struct Period: Identifiable, Codable {
 
 struct AddPeriodView: View {
     @State private var startDate = Date()
-    @State private var endDate = Date()
-    @State private var hasEnded = false
     @Environment(\.dismiss) var dismiss
     let onSave: (Date, Date?) -> Void
     
@@ -568,12 +566,12 @@ struct AddPeriodView: View {
                         .datePickerStyle(.graphical)
                 }
                 
-                Section(header: Text("Period End Date")) {
-                    Toggle("Period has ended", isOn: $hasEnded)
-                    
-                    if hasEnded {
-                        DatePicker("End Date", selection: $endDate, displayedComponents: .date)
-                            .disabled(endDate < startDate)
+                Section(footer: Text("Period duration is automatically set to 7 days")) {
+                    HStack {
+                        Text("Duration")
+                        Spacer()
+                        Text("7 days")
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -588,21 +586,16 @@ struct AddPeriodView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
-                        // Validate dates before saving
-                        let validEndDate = hasEnded ? endDate : nil
-                        if let end = validEndDate, end < startDate {
-                            // Don't save if end date is before start date
-                            return
-                        }
-                        // Ensure dates are not in the future
+                        // Ensure start date is not in the future
                         let now = Date()
                         let safeStartDate = startDate > now ? now : startDate
-                        let safeEndDate = validEndDate.map { $0 > now ? now : $0 }
                         
-                        onSave(safeStartDate, safeEndDate)
+                        // Automatically calculate end date as 6 days after start (7-day duration)
+                        let endDate = Calendar.current.date(byAdding: .day, value: 6, to: safeStartDate)
+                        
+                        onSave(safeStartDate, endDate)
                         dismiss()
                     }
-                    .disabled(hasEnded && endDate < startDate)
                 }
             }
         }
@@ -612,8 +605,6 @@ struct AddPeriodView: View {
 struct EditPeriodView: View {
     let period: Period
     @State private var startDate: Date
-    @State private var endDate: Date
-    @State private var hasEnded: Bool
     @Environment(\.dismiss) var dismiss
     let onSave: (Period) -> Void
     let onDelete: () -> Void
@@ -621,8 +612,6 @@ struct EditPeriodView: View {
     init(period: Period, onSave: @escaping (Period) -> Void, onDelete: @escaping () -> Void) {
         self.period = period
         self._startDate = State(initialValue: period.startDate)
-        self._endDate = State(initialValue: period.endDate ?? Date())
-        self._hasEnded = State(initialValue: period.endDate != nil)
         self.onSave = onSave
         self.onDelete = onDelete
     }
@@ -635,12 +624,12 @@ struct EditPeriodView: View {
                         .datePickerStyle(.graphical)
                 }
                 
-                Section(header: Text("Period End Date")) {
-                    Toggle("Period has ended", isOn: $hasEnded)
-                    
-                    if hasEnded {
-                        DatePicker("End Date", selection: $endDate, displayedComponents: .date)
-                            .disabled(endDate < startDate)
+                Section(footer: Text("Period duration is automatically set to 7 days")) {
+                    HStack {
+                        Text("Duration")
+                        Spacer()
+                        Text("7 days")
+                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -666,20 +655,17 @@ struct EditPeriodView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
-                        // Validate dates before saving
-                        let validEndDate = hasEnded ? endDate : nil
-                        if let end = validEndDate, end < startDate {
-                            return
-                        }
-                        
                         var updatedPeriod = period
                         let now = Date()
-                        updatedPeriod.startDate = startDate > now ? now : startDate
-                        updatedPeriod.endDate = validEndDate.map { $0 > now ? now : $0 }
+                        let safeStartDate = startDate > now ? now : startDate
+                        updatedPeriod.startDate = safeStartDate
+                        
+                        // Automatically calculate end date as 6 days after start (7-day duration)
+                        updatedPeriod.endDate = Calendar.current.date(byAdding: .day, value: 6, to: safeStartDate)
+                        
                         onSave(updatedPeriod)
                         dismiss()
                     }
-                    .disabled(hasEnded && endDate < startDate)
                 }
             }
         }
